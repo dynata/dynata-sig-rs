@@ -4,3 +4,36 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+zeroize = "1"
+jiff = { version = "0.2" }
+digest = { version = "0.10", features = ["std"] }
+sha-1 = { version = "0.10" }
+sha2 = { version = "0.10" }
+hmac = { version = "0.12", features = ["std"] }
+data-encoding = { version = "2" }
+serde = { version = "1", features = ["derive"] }
+http = "1"
+percent-encoding = "2"
+form_urlencoded = "1"
+
+hyper = { version = "1", features = ["full"], optional = true }
+reqwest = { version = "^0.13", optional = true, default-features = false, features = ["rustls"] }
+
+[features]
+default = []
+reqwest = ["dep:reqwest"]
+hyper = ["dep:hyper"]
+
+[lints.rust]
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+missing_copy_implementations = "deny"
+trivial_casts = "deny"
+trivial_numeric_casts = "deny"
+unsafe_code = "deny"
+unstable_features = "deny"
+unused_qualifications = "deny"
+dead_code = "deny"
+
+[lints.clippy]
+all = "deny"
