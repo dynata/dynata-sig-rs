@@ -41,11 +41,11 @@ pub trait ToHmac {
     where
         D: CoreProxy,
         D::Core: HashMarker
-        + UpdateCore
-        + FixedOutputCore
-        + BufferKindUser<BufferKind = Eager>
-        + Default
-        + Clone,
+            + UpdateCore
+            + FixedOutputCore
+            + BufferKindUser<BufferKind = Eager>
+            + Default
+            + Clone,
         <D::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
         Le<<D::Core as BlockSizeUser>::BlockSize, U256>: NonZero;
 }
@@ -55,11 +55,11 @@ impl<T: AsRef<[u8]>> ToHmac for T {
     where
         D: CoreProxy,
         D::Core: HashMarker
-        + UpdateCore
-        + FixedOutputCore
-        + BufferKindUser<BufferKind = Eager>
-        + Default
-        + Clone,
+            + UpdateCore
+            + FixedOutputCore
+            + BufferKindUser<BufferKind = Eager>
+            + Default
+            + Clone,
         <D::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
         Le<<D::Core as BlockSizeUser>::BlockSize, U256>: NonZero,
     {

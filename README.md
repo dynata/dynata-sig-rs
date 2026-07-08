@@ -1,15 +1,17 @@
 # dynata-sig-rs
 
 A Rust library for Dynata request-signing primitives. It provides the following:
+
 * URL canonicalization for signing
 * Signing-string generation (SHA256 lowercase hex of METHOD + canonical_url + body)
-* Signature generation via the 3-step HMAC-SHA256 chain 
+* Signature generation via the 3-step HMAC-SHA256 chain
 
 ### Credentials
 
 Before sending signed requests you will need credentials for Dynata APIs. These consist of:
 
-- **Access key**: used locally to compute the `dynata-signature` and also sent in the `dynata-access-key` request header.
+- **Access key**: used locally to compute the `dynata-signature` and also sent in the `dynata-access-key` request
+  header.
 - **Secret key**: never sent as a header; used locally to compute the `dynata-signature`.
 
 ### Installation
@@ -19,14 +21,14 @@ cargo add --git https://github.com/dynata/dynata-sig-rs.git --tag 1.0.0
 ```
 
 #### Features
+
 * hyper (optional): Add support for applying signatures to a hyper request builder
 * reqwest (optional): Add support for applying signatures to a reqwest request builder
 
 ### Usage
 
-For example, using the reqwest feature:
 ```rust
-use dynata_sig::signature::{Apply, Signer};
+use dynata_sig::signature::Signer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -36,11 +38,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let body = "{}";
 
-    let signing_string = dynata_sig::http::construct_signing_string(
-        http::Method::POST,
-        &canonical_uri.to_string(),
-        Some(body),
-    );
+    let signing_string =
+        dynata_sig::http::construct_signing_string(http::Method::POST, &canonical_uri, body);
 
     let access_key = std::env::var("DYNATA_ACCESS_KEY")?;
     let secret_key = std::env::var("DYNATA_SECRET_KEY")?;
@@ -52,7 +51,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let request = reqwest::Client::new()
         .post(canonical_uri.to_string())
         .body(body)
-        .apply(signature)
+        .header("dynata-expiration", signature.expiration)
+        .header("dynata-access-key", signature.access_key)
+        .header("dynata-signature", signature.value)
         .send()
         .await?;
 

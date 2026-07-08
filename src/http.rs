@@ -2,6 +2,7 @@
 Types for constructing signed http requests
 */
 use std::collections::BTreeMap;
+use std::fmt::Display;
 
 use http::uri::Scheme;
 use http::{Method, Uri};
@@ -19,8 +20,12 @@ const REPLACEMENTS: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'~');
 
 /// Construct a signing string for http requests
-pub fn construct_signing_string(method: Method, canonical_url: &str, body: Option<&str>) -> String {
-    format!("{method}{canonical_url}{}", body.unwrap_or_default())
+pub fn construct_signing_string<U: Display + ?Sized, B: Display + ?Sized>(
+    method: Method,
+    canonical_url: &U,
+    body: &B,
+) -> String {
+    format!("{method}{canonical_url}{body}")
 }
 
 /// Convert a well-formed Uri into a canonically-ordered representation
@@ -67,8 +72,7 @@ mod test {
 
     #[test]
     fn signing_string_with_all_parts() {
-        let result =
-            construct_signing_string(Method::GET, "some string", Some("some other string"));
+        let result = construct_signing_string(Method::GET, "some string", "some other string");
         let expected = "GETsome stringsome other string";
 
         assert_eq!(expected, result);
@@ -76,7 +80,7 @@ mod test {
 
     #[test]
     fn signing_string_with_no_body() {
-        let result = construct_signing_string(Method::GET, "some string", None);
+        let result = construct_signing_string(Method::GET, "some string", "");
         let expected = "GETsome string";
 
         assert_eq!(expected, result);
