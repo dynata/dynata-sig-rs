@@ -5,10 +5,12 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 
 use crate::hash::ToHash;
-use http::uri::Scheme;
+use http::uri::{PathAndQuery, Scheme};
 use http::{Method, Uri};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode, percent_encode};
 use sha2::Sha256;
+
+use crate::signature::{Apply, Signature};
 
 #[cfg(feature = "hyper")]
 mod hyper;
@@ -68,9 +70,31 @@ pub fn canonicalize_uri(uri: &Uri) -> Uri {
         .unwrap()
 }
 
+impl Apply<Signature> for Uri {
+    fn apply(self, subject: Signature) -> Self {
+        let mut parts = self.into_parts();
+        if let Some(ref mut pq) = parts.path_and_query {
+            let mut query = form_urlencoded::parse(pq.query().unwrap_or_default().as_bytes())
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<String>>();
+
+            query.push(format!("dynata-expiration={}", subject.expiration));
+            query.push(format!("dynata-access-key={}", subject.access_key));
+            query.push(format!("dynata-signature={}", subject.value));
+
+            *pq = PathAndQuery::from_maybe_shared(format!("{}?{}", pq.path(), query.join("&")))
+                .unwrap()
+        }
+
+        //SAFETY: Parts came from a valid Uri, and the modifications above wouldn't invalidate it
+        Uri::from_parts(parts).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::signature::Signer;
 
     #[test]
     fn signing_string_with_all_parts() {
@@ -182,5 +206,57 @@ mod test {
         let expected = "https://example.com/?k%C3%A9y=val%C3%BCe";
         assert_eq!(expected, uri.to_string());
         assert_eq!(expected, canon.to_string());
+    }
+
+    #[test]
+    fn apply_signature_uri_with_params() {
+        let uri = Uri::builder()
+            .scheme("https")
+            .authority("example.com")
+            .path_and_query("/?some=thing")
+            .build()
+            .unwrap();
+
+        let uri = canonicalize_uri(&uri);
+        let signing_string = construct_signing_string(&Method::GET, &uri, "");
+        let signature = signing_string
+            .sign(
+                &("access-key".into(), "secret-key".into()).into(),
+                &"2021-03-30T14:17:29.208Z".parse().unwrap(),
+            )
+            .unwrap();
+
+        let signed_uri = uri.apply(signature);
+
+        assert_eq!(
+            "https://example.com/?some=thing&dynata-expiration=2021-03-30T14:17:29.208Z&dynata-access-key=access-key&dynata-signature=163ad31084914fdce4dd918c06544d2f25fa7c37104fb1ae74ab6904d3688fd6",
+            signed_uri.to_string()
+        );
+    }
+
+    #[test]
+    fn apply_signature_uri_without_params() {
+        let uri = Uri::builder()
+            .scheme("https")
+            .authority("example.com")
+            .path_and_query("/")
+            .build()
+            .unwrap();
+
+        let uri = canonicalize_uri(&uri);
+        let signing_string = construct_signing_string(&Method::GET, &uri, "");
+        let signature = signing_string
+            .sign(
+                &("access-key".into(), "secret-key".into()).into(),
+                &"2021-03-30T14:17:29.208Z".parse().unwrap(),
+            )
+            .unwrap();
+
+        let signed_uri = uri.apply(signature);
+
+        assert_eq!(
+            "https://example.com/?dynata-expiration=2021-03-30T14:17:29.208Z&dynata-access-key=access-key&dynata-signature=cde53f89fb6f923f7c74dff99227841477897f6dd81d7b7b909b2090412f22f7",
+            signed_uri.to_string()
+        );
     }
 }
