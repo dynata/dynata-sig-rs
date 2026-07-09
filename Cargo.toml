@@ -8,7 +8,7 @@ zeroize = "1"
 jiff = { version = "0.2" }
 digest = { version = "0.10", features = ["std"] }
 sha-1 = { version = "0.10" }
-sha2 = { version = "0.10" }
+sha2 = { version = "0.11" }
 hmac = { version = "0.12", features = ["std"] }
 data-encoding = { version = "2" }
 serde = { version = "1", features = ["derive"] }
