@@ -4,9 +4,11 @@ Types for constructing signed http requests
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
+use crate::hash::ToHash;
 use http::uri::Scheme;
 use http::{Method, Uri};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode, percent_encode};
+use sha2::Sha256;
 
 #[cfg(feature = "hyper")]
 mod hyper;
@@ -25,7 +27,7 @@ pub fn construct_signing_string<U: Display + ?Sized, B: Display + ?Sized>(
     canonical_url: &U,
     body: &B,
 ) -> String {
-    format!("{method}{canonical_url}{body}")
+    format!("{method}{canonical_url}{body}").to_hash::<Sha256>()
 }
 
 /// Convert a well-formed Uri into a canonically-ordered representation
@@ -73,7 +75,7 @@ mod test {
     #[test]
     fn signing_string_with_all_parts() {
         let result = construct_signing_string(Method::GET, "some string", "some other string");
-        let expected = "GETsome stringsome other string";
+        let expected = "GETsome stringsome other string".to_hash::<Sha256>();
 
         assert_eq!(expected, result);
     }
@@ -81,7 +83,7 @@ mod test {
     #[test]
     fn signing_string_with_no_body() {
         let result = construct_signing_string(Method::GET, "some string", "");
-        let expected = "GETsome string";
+        let expected = "GETsome string".to_hash::<Sha256>();
 
         assert_eq!(expected, result);
     }
