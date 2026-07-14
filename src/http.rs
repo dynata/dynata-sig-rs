@@ -23,7 +23,7 @@ const REPLACEMENTS: &AsciiSet = &NON_ALPHANUMERIC
 
 /// Construct a signing string for http requests
 pub fn construct_signing_string<U: Display + ?Sized, B: Display + ?Sized>(
-    method: Method,
+    method: &Method,
     canonical_url: &U,
     body: &B,
 ) -> String {
@@ -74,7 +74,7 @@ mod test {
 
     #[test]
     fn signing_string_with_all_parts() {
-        let result = construct_signing_string(Method::GET, "some string", "some other string");
+        let result = construct_signing_string(&Method::GET, "some string", "some other string");
         let expected = "GETsome stringsome other string".to_hash::<Sha256>();
 
         assert_eq!(expected, result);
@@ -82,7 +82,7 @@ mod test {
 
     #[test]
     fn signing_string_with_no_body() {
-        let result = construct_signing_string(Method::GET, "some string", "");
+        let result = construct_signing_string(&Method::GET, "some string", "");
         let expected = "GETsome string".to_hash::<Sha256>();
 
         assert_eq!(expected, result);

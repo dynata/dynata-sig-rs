@@ -39,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let body = "{}";
 
     let signing_string =
-        dynata_sig::http::construct_signing_string(http::Method::POST, &canonical_uri, body);
+        dynata_sig::http::construct_signing_string(&http::Method::POST, &canonical_uri, body);
 
     let access_key = std::env::var("DYNATA_ACCESS_KEY")?;
     let secret_key = std::env::var("DYNATA_SECRET_KEY")?;
