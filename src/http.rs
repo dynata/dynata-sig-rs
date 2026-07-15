@@ -2,7 +2,7 @@
 Types for constructing signed http requests
 */
 use std::collections::BTreeMap;
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 
 use crate::hash::ToHash;
 use http::uri::{PathAndQuery, Scheme};
@@ -23,56 +23,74 @@ const REPLACEMENTS: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'_')
     .remove(b'~');
 
-/// Construct a signing string for http requests
-pub fn construct_signing_string<U: Display + ?Sized, B: Display + ?Sized>(
-    method: &Method,
-    canonical_url: &U,
-    body: &B,
-) -> String {
-    format!("{method}{canonical_url}{body}").to_hash::<Sha256>()
+/// Contains a [Uri] that has been pruned, ordered, and encoded into the canonical form
+#[derive(Debug, Clone)]
+pub struct CanonicalUri(Uri);
+
+impl Display for CanonicalUri {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
-/// Convert a well-formed Uri into a canonically-ordered representation
-pub fn canonicalize_uri(uri: &Uri) -> Uri {
-    let query = form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
-        .fold(BTreeMap::new(), |mut acc, (key, value)| {
-            acc.insert(key, value);
+impl CanonicalUri {
+    /// Construct a signing string for http requests
+    pub fn build_signing_string(&self, method: &Method, body: impl Display) -> String {
+        format!("{method}{self}{body}").to_hash::<Sha256>()
+    }
+}
 
-            acc
-        })
-        .iter()
-        .map(|(key, value)| {
-            format!(
-                "{}={}",
-                percent_encode(
-                    percent_decode(key.as_bytes())
-                        .decode_utf8()
-                        .unwrap()
-                        .as_bytes(),
-                    REPLACEMENTS
-                ),
-                percent_encode(
-                    percent_decode(value.as_bytes())
-                        .decode_utf8()
-                        .unwrap()
-                        .as_bytes(),
-                    REPLACEMENTS
+impl From<Uri> for CanonicalUri {
+    fn from(uri: Uri) -> Self {
+        let query = form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
+            .fold(BTreeMap::new(), |mut acc, (key, value)| {
+                acc.insert(key, value);
+
+                acc
+            })
+            .iter()
+            .map(|(key, value)| {
+                format!(
+                    "{}={}",
+                    percent_encode(
+                        percent_decode(key.as_bytes())
+                            .decode_utf8()
+                            .unwrap()
+                            .as_bytes(),
+                        REPLACEMENTS
+                    ),
+                    percent_encode(
+                        percent_decode(value.as_bytes())
+                            .decode_utf8()
+                            .unwrap()
+                            .as_bytes(),
+                        REPLACEMENTS
+                    )
                 )
-            )
-        })
-        .collect::<Vec<String>>();
+            })
+            .collect::<Vec<String>>();
 
-    Uri::builder()
-        .scheme(uri.scheme().cloned().unwrap_or(Scheme::HTTPS))
-        .authority(uri.host().unwrap_or_default())
-        .path_and_query(format!("{}?{}", uri.path(), query.join("&")))
-        .build()
-        .unwrap()
+        Self(
+            Uri::builder()
+                .scheme(uri.scheme().cloned().unwrap_or(Scheme::HTTPS))
+                .authority(uri.host().unwrap_or_default())
+                .path_and_query(format!("{}?{}", uri.path(), query.join("&")))
+                .build()
+                //SAFETY: These pieces came from a valid Uri, and the modifications above wouldn't invalidate it
+                .unwrap(),
+        )
+    }
 }
 
-impl Apply<Signature> for Uri {
+impl From<CanonicalUri> for Uri {
+    fn from(value: CanonicalUri) -> Self {
+        value.0
+    }
+}
+
+impl Apply<Signature> for CanonicalUri {
     fn apply(self, subject: Signature) -> Self {
-        let mut parts = self.into_parts();
+        let mut parts = self.0.into_parts();
         if let Some(ref mut pq) = parts.path_and_query {
             let mut query = form_urlencoded::parse(pq.query().unwrap_or_default().as_bytes())
                 .map(|(k, v)| format!("{k}={v}"))
@@ -87,7 +105,7 @@ impl Apply<Signature> for Uri {
         }
 
         //SAFETY: Parts came from a valid Uri, and the modifications above wouldn't invalidate it
-        Uri::from_parts(parts).unwrap()
+        Self(Uri::from_parts(parts).unwrap())
     }
 }
 
@@ -98,16 +116,22 @@ mod test {
 
     #[test]
     fn signing_string_with_all_parts() {
-        let result = construct_signing_string(&Method::GET, "some string", "some other string");
-        let expected = "GETsome stringsome other string".to_hash::<Sha256>();
+        let canon: CanonicalUri = Uri::from_maybe_shared("https://example.dynata.com")
+            .unwrap()
+            .into();
+        let result = canon.build_signing_string(&Method::GET, "some string");
+        let expected = "GEThttps://example.dynata.com/?some string".to_hash::<Sha256>();
 
         assert_eq!(expected, result);
     }
 
     #[test]
     fn signing_string_with_no_body() {
-        let result = construct_signing_string(&Method::GET, "some string", "");
-        let expected = "GETsome string".to_hash::<Sha256>();
+        let canon: CanonicalUri = Uri::from_maybe_shared("https://example.dynata.com")
+            .unwrap()
+            .into();
+        let result = canon.build_signing_string(&Method::GET, "");
+        let expected = "GEThttps://example.dynata.com/?".to_hash::<Sha256>();
 
         assert_eq!(expected, result);
     }
@@ -121,7 +145,7 @@ mod test {
             .build()
             .unwrap();
 
-        let canon = canonicalize_uri(&uri);
+        let canon: CanonicalUri = uri.clone().into();
 
         let expected = "https://example.com/something?param=1";
         assert_ne!(expected, uri.to_string());
@@ -137,7 +161,7 @@ mod test {
             .build()
             .unwrap();
 
-        let canon = canonicalize_uri(&uri);
+        let canon: CanonicalUri = uri.clone().into();
 
         let expected = "https://example.com/?";
         assert_ne!(expected, uri.to_string());
@@ -153,7 +177,7 @@ mod test {
             .build()
             .unwrap();
 
-        let canon = canonicalize_uri(&uri);
+        let canon: CanonicalUri = uri.clone().into();
 
         let expected = "https://example.com/?a=1&b=2&c=3&d=4";
         assert_ne!(expected, uri.to_string());
@@ -169,7 +193,7 @@ mod test {
             .build()
             .unwrap();
 
-        let canon = canonicalize_uri(&uri);
+        let canon: CanonicalUri = uri.clone().into();
 
         let expected = "https://example.com/?a=3";
         assert_ne!(expected, uri.to_string());
@@ -185,7 +209,7 @@ mod test {
             .build()
             .unwrap();
 
-        let canon = canonicalize_uri(&uri);
+        let canon: CanonicalUri = uri.clone().into();
 
         let expected = "https://example.com/?k%C3%A9y=val%C3%BCe";
         assert_ne!(expected, uri.to_string());
@@ -201,7 +225,7 @@ mod test {
             .build()
             .unwrap();
 
-        let canon = canonicalize_uri(&uri);
+        let canon: CanonicalUri = uri.clone().into();
 
         let expected = "https://example.com/?k%C3%A9y=val%C3%BCe";
         assert_eq!(expected, uri.to_string());
@@ -210,15 +234,15 @@ mod test {
 
     #[test]
     fn apply_signature_uri_with_params() {
-        let uri = Uri::builder()
+        let uri: CanonicalUri = Uri::builder()
             .scheme("https")
             .authority("example.com")
             .path_and_query("/?some=thing")
             .build()
-            .unwrap();
+            .unwrap()
+            .into();
 
-        let uri = canonicalize_uri(&uri);
-        let signing_string = construct_signing_string(&Method::GET, &uri, "");
+        let signing_string = uri.build_signing_string(&Method::GET, "");
         let signature = signing_string
             .sign(
                 &("access-key".into(), "secret-key".into()).into(),
@@ -236,15 +260,15 @@ mod test {
 
     #[test]
     fn apply_signature_uri_without_params() {
-        let uri = Uri::builder()
+        let uri: CanonicalUri = Uri::builder()
             .scheme("https")
             .authority("example.com")
             .path_and_query("/")
             .build()
-            .unwrap();
+            .unwrap()
+            .into();
 
-        let uri = canonicalize_uri(&uri);
-        let signing_string = construct_signing_string(&Method::GET, &uri, "");
+        let signing_string = uri.build_signing_string(&Method::GET, "");
         let signature = signing_string
             .sign(
                 &("access-key".into(), "secret-key".into()).into(),
