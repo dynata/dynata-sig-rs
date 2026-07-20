@@ -32,14 +32,12 @@ use dynata_sig::signature::Signer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let canonical_uri = dynata_sig::http::canonicalize_uri(
-        &"https://example.dynata.com/authorize?b=2&b=1&a=9".try_into()?,
-    );
+    let uri: http::Uri = "https://example.dynata.com/endpoint?b=2&b=1&a=9".try_into()?;
+    let canonical_uri: CanonicalUri = uri.into();
 
     let body = "{}";
 
-    let signing_string =
-        dynata_sig::http::construct_signing_string(&http::Method::POST, &canonical_uri, body);
+    let signing_string = canonical_uri.build_signing_string(&http::Method::POST, body);
 
     let access_key = std::env::var("DYNATA_ACCESS_KEY")?;
     let secret_key = std::env::var("DYNATA_SECRET_KEY")?;
