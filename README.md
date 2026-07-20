@@ -17,7 +17,7 @@ Before sending signed requests you will need credentials for Dynata APIs. These 
 ### Installation
 
 ```bash
-cargo add --git https://github.com/dynata/dynata-sig-rs.git --tag 1.0.0
+cargo add dynata-sig
 ```
 
 #### Features
