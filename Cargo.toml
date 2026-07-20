@@ -2,6 +2,9 @@
 name = "dynata-sig"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/dynata/dynata-sig-rs"
+description = "Request signing implementation for the Dynata signing algorithm"
 
 [dependencies]
 zeroize = "1"
