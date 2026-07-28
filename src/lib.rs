@@ -5,5 +5,7 @@ signing algorithm.
 
 pub mod hash;
 pub mod http;
+#[cfg(feature = "provider")]
+pub mod provider;
 pub mod signature;
 pub mod time;
