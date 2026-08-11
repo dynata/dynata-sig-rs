@@ -4,12 +4,12 @@ Types for constructing signed http requests
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 
-use crate::hash::ToHash;
 use http::uri::{PathAndQuery, Scheme};
 use http::{Method, Uri};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode, percent_encode};
 use sha2::Sha256;
 
+use crate::hash::ToHash;
 use crate::signature::{Apply, Signature};
 
 #[cfg(feature = "hyper")]
@@ -40,51 +40,106 @@ impl CanonicalUri {
     }
 }
 
-impl From<Uri> for CanonicalUri {
-    fn from(uri: Uri) -> Self {
-        let query = form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
-            .fold(BTreeMap::new(), |mut acc, (key, value)| {
-                acc.insert(key, value);
+impl From<CanonicalUri> for Uri {
+    fn from(value: CanonicalUri) -> Self {
+        value.0
+    }
+}
 
-                acc
-            })
+impl TryFrom<Uri> for CanonicalUri {
+    type Error = CanonicalizationError;
+
+    fn try_from(uri: Uri) -> Result<Self, Self::Error> {
+        let query = form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
+            .try_fold(BTreeMap::new(), |mut acc, (key, value)| {
+                if acc.insert(key, value).is_none() {
+                    Ok(acc)
+                } else {
+                    Err(CanonicalizationError::DuplicateParams)
+                }
+            })?
             .iter()
             .map(|(key, value)| {
-                format!(
+                Ok(format!(
                     "{}={}",
                     percent_encode(
-                        percent_decode(key.as_bytes())
-                            .decode_utf8()
-                            .unwrap()
-                            .as_bytes(),
+                        percent_decode(key.as_bytes()).decode_utf8()?.as_bytes(),
                         REPLACEMENTS
                     ),
                     percent_encode(
-                        percent_decode(value.as_bytes())
-                            .decode_utf8()
-                            .unwrap()
-                            .as_bytes(),
+                        percent_decode(value.as_bytes()).decode_utf8()?.as_bytes(),
                         REPLACEMENTS
                     )
-                )
+                ))
             })
-            .collect::<Vec<String>>();
+            .collect::<Result<Vec<String>, std::str::Utf8Error>>()?;
 
-        Self(
+        Ok(Self(
             Uri::builder()
                 .scheme(uri.scheme().cloned().unwrap_or(Scheme::HTTPS))
                 .authority(uri.host().unwrap_or_default())
                 .path_and_query(format!("{}?{}", uri.path(), query.join("&")))
-                .build()
-                //SAFETY: These pieces came from a valid Uri, and the modifications above wouldn't invalidate it
-                .unwrap(),
+                .build()?,
+        ))
+    }
+}
+
+/// Errors that can occur in the canonicalization process.
+#[derive(Debug)]
+pub enum CanonicalizationError {
+    /// A parameter occurred more than once in the query string
+    DuplicateParams,
+    /// A parameter key or value was not UTF-8 compatible
+    Utf8Error,
+    /// Reconstruction of the Uri failed
+    InvalidUri(http::Error),
+}
+
+impl std::error::Error for CanonicalizationError {}
+
+impl Display for CanonicalizationError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CanonicalizationError::DuplicateParams => {
+                write!(f, "query contains duplicate parameters")
+            }
+            CanonicalizationError::Utf8Error => {
+                write!(f, "a parameter key or value was not UTF-8 compatible")
+            }
+            CanonicalizationError::InvalidUri(e) => {
+                write!(f, "reconstructed Uri is invalid: {e}")
+            }
+        }
+    }
+}
+
+impl PartialEq for CanonicalizationError {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (
+                CanonicalizationError::DuplicateParams,
+                CanonicalizationError::DuplicateParams
+            ) | (
+                CanonicalizationError::Utf8Error,
+                CanonicalizationError::Utf8Error
+            ) | (
+                CanonicalizationError::InvalidUri(_),
+                CanonicalizationError::InvalidUri(_)
+            )
         )
     }
 }
 
-impl From<CanonicalUri> for Uri {
-    fn from(value: CanonicalUri) -> Self {
-        value.0
+impl From<std::str::Utf8Error> for CanonicalizationError {
+    fn from(_: std::str::Utf8Error) -> Self {
+        Self::Utf8Error
+    }
+}
+
+impl From<http::Error> for CanonicalizationError {
+    fn from(value: http::Error) -> Self {
+        Self::InvalidUri(value)
     }
 }
 
@@ -118,7 +173,8 @@ mod test {
     fn signing_string_with_all_parts() {
         let canon: CanonicalUri = Uri::from_maybe_shared("https://example.dynata.com")
             .unwrap()
-            .into();
+            .try_into()
+            .unwrap();
         let result = canon.build_signing_string(&Method::GET, "some string");
         let expected = "GEThttps://example.dynata.com/?some string".to_hash::<Sha256>();
 
@@ -129,7 +185,8 @@ mod test {
     fn signing_string_with_no_body() {
         let canon: CanonicalUri = Uri::from_maybe_shared("https://example.dynata.com")
             .unwrap()
-            .into();
+            .try_into()
+            .unwrap();
         let result = canon.build_signing_string(&Method::GET, "");
         let expected = "GEThttps://example.dynata.com/?".to_hash::<Sha256>();
 
@@ -145,7 +202,7 @@ mod test {
             .build()
             .unwrap();
 
-        let canon: CanonicalUri = uri.clone().into();
+        let canon: CanonicalUri = uri.clone().try_into().unwrap();
 
         let expected = "https://example.com/something?param=1";
         assert_ne!(expected, uri.to_string());
@@ -161,7 +218,7 @@ mod test {
             .build()
             .unwrap();
 
-        let canon: CanonicalUri = uri.clone().into();
+        let canon: CanonicalUri = uri.clone().try_into().unwrap();
 
         let expected = "https://example.com/?";
         assert_ne!(expected, uri.to_string());
@@ -177,7 +234,7 @@ mod test {
             .build()
             .unwrap();
 
-        let canon: CanonicalUri = uri.clone().into();
+        let canon: CanonicalUri = uri.clone().try_into().unwrap();
 
         let expected = "https://example.com/?a=1&b=2&c=3&d=4";
         assert_ne!(expected, uri.to_string());
@@ -185,7 +242,7 @@ mod test {
     }
 
     #[test]
-    fn canonical_uri_deduplicates_params() {
+    fn canonical_uri_fails_on_duplicates() {
         let uri = Uri::builder()
             .scheme("https")
             .authority("example.com")
@@ -193,11 +250,9 @@ mod test {
             .build()
             .unwrap();
 
-        let canon: CanonicalUri = uri.clone().into();
+        let canon: Result<CanonicalUri, CanonicalizationError> = uri.clone().try_into();
 
-        let expected = "https://example.com/?a=3";
-        assert_ne!(expected, uri.to_string());
-        assert_eq!(expected, canon.to_string());
+        assert_eq!(CanonicalizationError::DuplicateParams, canon.err().unwrap());
     }
 
     #[test]
@@ -209,7 +264,7 @@ mod test {
             .build()
             .unwrap();
 
-        let canon: CanonicalUri = uri.clone().into();
+        let canon: CanonicalUri = uri.clone().try_into().unwrap();
 
         let expected = "https://example.com/?k%C3%A9y=val%C3%BCe";
         assert_ne!(expected, uri.to_string());
@@ -225,7 +280,7 @@ mod test {
             .build()
             .unwrap();
 
-        let canon: CanonicalUri = uri.clone().into();
+        let canon: CanonicalUri = uri.clone().try_into().unwrap();
 
         let expected = "https://example.com/?k%C3%A9y=val%C3%BCe";
         assert_eq!(expected, uri.to_string());
@@ -240,7 +295,8 @@ mod test {
             .path_and_query("/?some=thing")
             .build()
             .unwrap()
-            .into();
+            .try_into()
+            .unwrap();
 
         let signing_string = uri.build_signing_string(&Method::GET, "");
         let signature = signing_string
@@ -266,7 +322,8 @@ mod test {
             .path_and_query("/")
             .build()
             .unwrap()
-            .into();
+            .try_into()
+            .unwrap();
 
         let signing_string = uri.build_signing_string(&Method::GET, "");
         let signature = signing_string
