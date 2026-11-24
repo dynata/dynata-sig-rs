@@ -8,7 +8,7 @@ description = "Request signing implementation for the Dynata signing algorithm"
 
 [dependencies]
 zeroize = "1"
-jiff = { version = "0.2" }
+jiff = { version = "1" }
 digest = { version = "0.10", features = ["std"] }
 sha-1 = { version = "0.10" }
 sha2 = { version = "0.10" }
